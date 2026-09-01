@@ -88,6 +88,7 @@
 <script>
   const $=id=>document.getElementById(id);
   const STORE='tiyapuy_inventory_v1';
+  const DEFAULT_EXCEL='APP_INVENTARIO_ALMACEN.xlsx';
   let workbook=null,stockRows=[],locations=[],currentMatches=[],current=null,rawOCR='',identificationType='MANUAL',scanMode='product',scanRow=0;
   let state=loadState();
 
@@ -103,19 +104,36 @@
   function valueFrom(row,names){for(const name of names){const key=Object.keys(row).find(k=>norm(k)===norm(name));if(key!==undefined)return row[key]}return''}
   function excelDate(v){if(v instanceof Date&&!isNaN(v))return v.toLocaleDateString('es-PE');if(typeof v==='number'&&v>20000){const d=XLSX.SSF.parse_date_code(v);return d?`${String(d.d).padStart(2,'0')}/${String(d.m).padStart(2,'0')}/${d.y}`:''}return String(v??'')}
 
+  async function processExcel(data,fileName){
+    workbook=XLSX.read(data,{type:'array',cellDates:true});
+    const stockName=workbook.SheetNames.find(n=>norm(n)==='STOCK_SISTEMA')||workbook.SheetNames[0];
+    const raw=XLSX.utils.sheet_to_json(workbook.Sheets[stockName],{defval:''});
+    stockRows=raw.map((r,i)=>({
+      sourceRow:i+2,reference:String(valueFrom(r,['Referencia Interna','Referencia interna'])),product:String(valueFrom(r,['Producto'])),lot:normLot(valueFrom(r,['Número de lote','Numero de lote','Lote'])),expiry:excelDate(valueFrom(r,['Fecha de caducidad','Fecha de vencimiento'])),systemLocation:String(valueFrom(r,['Lugar','Lugar sistema','Ubicación'])),systemStock:num(valueFrom(r,['Cantidad inventariada','Stock sistema'])),unit:String(valueFrom(r,['Unidad de Medida','Unidad'])),barcode:String(valueFrom(r,['Código de barras producto','Codigo de barras producto']))
+    })).filter(r=>r.reference||r.product);
+    const locName=workbook.SheetNames.find(n=>norm(n)==='UBICACIONES');
+    locations=locName?XLSX.utils.sheet_to_json(workbook.Sheets[locName],{defval:''}).map(r=>({code:String(valueFrom(r,['Código ubicación','Codigo ubicación'])),name:String(valueFrom(r,['Nombre ubicación','Nombre ubicacion'])),barcode:String(valueFrom(r,['Código de barras','Codigo de barras'])),active:norm(valueFrom(r,['Activa']))!=='NO'})).filter(x=>x.code||x.name||x.barcode):[];
+    state.fileName=fileName;persist();$('fileName').textContent=fileName;$('fileInfo').textContent=`${stockRows.length} registros de stock · ${locations.length} ubicaciones`;show('mainMessage','Inventario cargado automáticamente.','ok');
+  }
+
   async function loadExcel(input){
     const file=input.files&&input.files[0];if(!file)return;
     try{
-      const data=await file.arrayBuffer();workbook=XLSX.read(data,{type:'array',cellDates:true});
-      const stockName=workbook.SheetNames.find(n=>norm(n)==='STOCK_SISTEMA')||workbook.SheetNames[0];
-      const raw=XLSX.utils.sheet_to_json(workbook.Sheets[stockName],{defval:''});
-      stockRows=raw.map((r,i)=>({
-        sourceRow:i+2,reference:String(valueFrom(r,['Referencia Interna','Referencia interna'])),product:String(valueFrom(r,['Producto'])),lot:normLot(valueFrom(r,['Número de lote','Numero de lote','Lote'])),expiry:excelDate(valueFrom(r,['Fecha de caducidad','Fecha de vencimiento'])),systemLocation:String(valueFrom(r,['Lugar','Lugar sistema','Ubicación'])),systemStock:num(valueFrom(r,['Cantidad inventariada','Stock sistema'])),unit:String(valueFrom(r,['Unidad de Medida','Unidad'])),barcode:String(valueFrom(r,['Código de barras producto','Codigo de barras producto']))
-      })).filter(r=>r.reference||r.product);
-      const locName=workbook.SheetNames.find(n=>norm(n)==='UBICACIONES');
-      locations=locName?XLSX.utils.sheet_to_json(workbook.Sheets[locName],{defval:''}).map(r=>({code:String(valueFrom(r,['Código ubicación','Codigo ubicación'])),name:String(valueFrom(r,['Nombre ubicación','Nombre ubicacion'])),barcode:String(valueFrom(r,['Código de barras','Codigo de barras'])),active:norm(valueFrom(r,['Activa']))!=='NO'})).filter(x=>x.code||x.name||x.barcode):[];
-      state.fileName=file.name;persist();$('fileName').textContent=file.name;$('fileInfo').textContent=`${stockRows.length} registros de stock · ${locations.length} ubicaciones`;show('mainMessage','Inventario cargado correctamente.','ok');
+      const data=await file.arrayBuffer();await processExcel(data,file.name);
     }catch(e){show('mainMessage','No se pudo leer el Excel: '+e.message,'error')}
+  }
+
+  async function loadDefaultExcel(){
+    try{
+      $('fileName').textContent='Cargando '+DEFAULT_EXCEL+'…';
+      const response=await fetch('./'+encodeURIComponent(DEFAULT_EXCEL),{cache:'no-store'});
+      if(!response.ok)throw new Error('HTTP '+response.status);
+      await processExcel(await response.arrayBuffer(),DEFAULT_EXCEL);
+    }catch(e){
+      $('fileName').textContent='No se cargó el Excel automático';
+      $('fileInfo').textContent='Puedes seleccionarlo manualmente con el botón superior.';
+      show('mainMessage','No se encontró '+DEFAULT_EXCEL+' junto a index.html. Usa la carga manual o revisa el nombre en GitHub.','warning');
+    }
   }
 
   async function runOCR(input){
@@ -167,7 +185,7 @@
   }
   function clearSession(){if(!confirm('¿Seguro que deseas borrar todos los conteos e incidencias guardados en este dispositivo?'))return;state={counts:[],incidents:[],fileName:state.fileName};persist();show('saveMessage','Conteos eliminados.','ok')}
   function buildRows(){const box=$('countRows');for(let i=1;i<=10;i++)box.insertAdjacentHTML('beforeend',`<div class="count-row"><div class="badge">${i}</div><div><label>Ubicación</label><div class="field-action"><input id="loc${i}" data-name="" placeholder="Código ubicación" onchange="validateLocation(this.value,${i})"><button class="icon" onclick="openBarcodePhoto('location',${i})">▦</button></div></div><div><label>Cantidad</label><input id="qty${i}" type="number" min="0" step="0.001" inputmode="decimal" oninput="recalc()"></div></div>`)}
-  function init(){buildRows();$('operator').value=localStorage.getItem('tiyapuy_operator')||'';if(state.fileName){$('fileName').textContent=state.fileName;$('fileInfo').textContent='Vuelve a cargar el Excel para continuar; los conteos siguen guardados.'}refreshSession();recalc()}
+  function init(){buildRows();$('operator').value=localStorage.getItem('tiyapuy_operator')||'';refreshSession();recalc();loadDefaultExcel()}
   init();
 </script>
 </body>
