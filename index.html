@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <meta name="theme-color" content="#17365d">
+  <title>Inventario de almacén</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    :root{--navy:#17365d;--teal:#197985;--lime:#d8ef35;--bg:#eef3f6;--ink:#162534;--muted:#607286;--line:#d8e1e8;--ok:#067647;--bad:#b42318;--warn:#9a6700}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);font-family:Arial,Helvetica,sans-serif;color:var(--ink)}
+    header{position:sticky;top:0;z-index:8;background:var(--navy);color:#fff;padding:13px 16px;box-shadow:0 2px 9px #0003}header h1{margin:0;font-size:19px}header small{opacity:.82}
+    main{max-width:850px;margin:auto;padding:14px}.card{background:#fff;border-radius:15px;padding:16px;margin-bottom:14px;box-shadow:0 3px 15px #17365d12}
+    h2,h3{margin:0 0 12px}.step{display:inline-grid;place-items:center;width:27px;height:27px;border-radius:50%;background:var(--teal);color:#fff;font-size:14px;margin-right:7px}
+    label{display:block;font-size:12px;font-weight:700;color:#465a6e;margin:10px 0 5px}input,select,textarea{width:100%;min-height:44px;border:1px solid #bccad5;border-radius:9px;padding:10px;font-size:16px;background:#fff}input[readonly]{background:#f4f6f8}
+    button{border:0;border-radius:9px;min-height:45px;padding:10px 13px;font-weight:700;font-size:14px;cursor:pointer}.primary{background:var(--teal);color:#fff}.dark{background:var(--navy);color:#fff}.accent{background:var(--lime);color:#17202a}.outline{background:#fff;border:1px solid var(--navy);color:var(--navy)}.danger{background:#fff0ef;color:var(--bad);border:1px solid #f7b7b2}
+    .actions,.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.actions{margin-top:12px}.status{display:none;margin-top:10px;padding:11px;border-radius:9px;font-size:14px}.status.show{display:block}.info{background:#e9f4ff;color:#175cd3}.ok{background:#e9f7ed;color:var(--ok)}.error{background:#feeceb;color:var(--bad)}.warning{background:#fff5d6;color:var(--warn)}
+    .file-state{display:flex;align-items:center;gap:10px;background:#f6f8fa;border:1px dashed #adc0cd;border-radius:10px;padding:12px;margin-top:10px}.file-state strong{display:block}.file-state span{font-size:12px;color:var(--muted)}
+    #labelPreview{display:none;width:100%;max-height:260px;object-fit:contain;background:#edf1f4;border-radius:10px;margin-top:10px}.busy{display:none;color:var(--teal);font-weight:700;padding:9px 0}.busy.show{display:block}
+    .field-action{display:grid;grid-template-columns:1fr 48px;gap:6px}.icon{background:var(--navy);color:#fff;font-size:20px;padding:0}
+    .count-row{display:grid;grid-template-columns:36px 1fr 100px;gap:8px;align-items:end;border-bottom:1px solid var(--line);padding:9px 0}.badge{height:44px;display:grid;place-items:center;background:#e5f2f3;color:var(--teal);border-radius:9px;font-weight:700}
+    .metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:13px}.metric{background:#f4f7f9;border-radius:10px;text-align:center;padding:10px}.metric strong{font-size:21px;display:block}.metric span{font-size:11px;color:var(--muted)}
+    .session{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.session div{background:#f5f7f9;padding:9px;border-radius:9px;text-align:center}.session strong{display:block;font-size:18px}.session span{font-size:11px;color:var(--muted)}
+    .hidden{display:none!important}.help{font-size:12px;color:var(--muted);line-height:1.4}.footer{text-align:center;font-size:12px;color:var(--muted);padding:5px 0 25px}
+    @media(max-width:590px){.grid,.actions{grid-template-columns:1fr}.count-row{grid-template-columns:32px 1fr 88px}.session{grid-template-columns:1fr 1fr 1fr}.card{padding:14px}main{padding:10px}}
+  </style>
+</head>
+<body>
+<header><h1>Inventario de almacén</h1><small>Excel · OCR · Código de barras · Consolidación</small></header>
+<main>
+  <section class="card">
+    <h3><span class="step">1</span>Cargar inventario</h3>
+    <input id="excelFile" type="file" accept=".xlsx,.xls" class="hidden" onchange="loadExcel(this)">
+    <button class="accent" style="width:100%" onclick="$('excelFile').click()">📄 Seleccionar Inventario.xlsx</button>
+    <div class="file-state"><div style="font-size:28px">📊</div><div><strong id="fileName">Ningún archivo cargado</strong><span id="fileInfo">El archivo se procesa únicamente en este dispositivo.</span></div></div>
+    <div id="mainMessage" class="status"></div>
+    <label>Responsable del conteo</label><input id="operator" placeholder="Nombre y apellido" onchange="saveOperator()">
+  </section>
+
+  <section class="card">
+    <h3><span class="step">2</span>Identificar producto</h3>
+    <div class="actions">
+      <button class="accent" onclick="$(`labelPhoto`).click()">📷 Fotografiar etiqueta OCR</button>
+      <button class="dark" onclick="openBarcodePhoto('product')">▦ Fotografiar código de producto</button>
+    </div>
+    <input id="labelPhoto" type="file" accept="image/*" capture="environment" class="hidden" onchange="runOCR(this)">
+    <input id="barcodePhoto" type="file" accept="image/*" capture="environment" class="hidden" onchange="decodeBarcode(this)">
+    <img id="labelPreview" alt="Fotografía de la etiqueta">
+    <div id="busy" class="busy">Procesando imagen…</div>
+    <div class="grid">
+      <div><label>Código del producto</label><div class="field-action"><input id="reference" placeholder="TC0114PE"><button class="icon" onclick="findManual()">⌕</button></div></div>
+      <div><label>Número de lote</label><input id="lot" placeholder="SN-21526-E2"></div>
+    </div>
+    <label>Producto</label><input id="product" readonly>
+    <div class="grid">
+      <div><label>Fecha de vencimiento</label><input id="expiry" placeholder="03/06/2027"></div>
+      <div><label>Unidad</label><input id="unit" readonly></div>
+    </div>
+    <div class="grid">
+      <div><label>Stock del sistema</label><input id="systemStock" type="number" readonly value="0"></div>
+      <div><label>Lotes encontrados</label><select id="lotOptions" onchange="chooseLot()"><option value="">—</option></select></div>
+    </div>
+    <div id="productMessage" class="status"></div>
+  </section>
+
+  <section class="card">
+    <h3><span class="step">3</span>Conteo por ubicación</h3>
+    <div id="countRows"></div>
+    <div class="metrics"><div class="metric"><strong id="physicalTotal">0</strong><span>Stock físico</span></div><div class="metric"><strong id="systemTotal">0</strong><span>Stock sistema</span></div><div class="metric"><strong id="difference">0</strong><span>Diferencia</span></div></div>
+  </section>
+
+  <section class="card">
+    <h3><span class="step">4</span>Guardar y consolidar</h3>
+    <label>Observación</label><textarea id="observation" rows="2" placeholder="Opcional"></textarea>
+    <div class="actions"><button class="primary" onclick="saveCount()">Guardar conteo</button><button class="outline" onclick="newProduct()">Nuevo producto</button></div>
+    <div id="saveMessage" class="status"></div>
+    <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
+    <div class="session"><div><strong id="savedProducts">0</strong><span>Productos/lotes</span></div><div><strong id="savedLocations">0</strong><span>Registros ubicación</span></div><div><strong id="incidentsCount">0</strong><span>Incidencias</span></div></div>
+    <div class="actions"><button class="dark" onclick="exportFinalExcel()">⬇ Descargar Excel definitivo</button><button class="danger" onclick="clearSession()">Borrar conteos</button></div>
+    <p class="help">El avance se conserva en este navegador. No borres los datos del navegador antes de descargar el Excel definitivo.</p>
+  </section>
+  <div id="barcodeReader" class="hidden"></div>
+  <div class="footer">Aplicación local: el Excel y las fotografías no se envían a Google.</div>
+</main>
+
+<script>
+  const $=id=>document.getElementById(id);
+  const STORE='tiyapuy_inventory_v1';
+  let workbook=null,stockRows=[],locations=[],currentMatches=[],current=null,rawOCR='',identificationType='MANUAL',scanMode='product',scanRow=0;
+  let state=loadState();
+
+  function loadState(){try{return JSON.parse(localStorage.getItem(STORE))||{counts:[],incidents:[],fileName:''}}catch(e){return{counts:[],incidents:[],fileName:''}}}
+  function persist(){localStorage.setItem(STORE,JSON.stringify(state));refreshSession()}
+  function norm(v){return String(v??'').trim().toUpperCase().replace(/\s+/g,' ')}
+  function normCode(v){return norm(v).replace(/[^A-Z0-9]/g,'')}
+  function normLot(v){let x=norm(v).replace(/\s*[-–—]\s*/g,'-');if(/^SN\d/.test(x))x=x.replace(/^SN/,'SN-');return x}
+  function num(v){const n=Number(v);return Number.isFinite(n)?n:0}
+  function fmt(n){return num(n).toLocaleString('es-PE',{maximumFractionDigits:3})}
+  function show(id,text,type='info'){const el=$(id);el.textContent=text;el.className=`status show ${type}`}
+  function hide(id){$(id).className='status'}
+  function valueFrom(row,names){for(const name of names){const key=Object.keys(row).find(k=>norm(k)===norm(name));if(key!==undefined)return row[key]}return''}
+  function excelDate(v){if(v instanceof Date&&!isNaN(v))return v.toLocaleDateString('es-PE');if(typeof v==='number'&&v>20000){const d=XLSX.SSF.parse_date_code(v);return d?`${String(d.d).padStart(2,'0')}/${String(d.m).padStart(2,'0')}/${d.y}`:''}return String(v??'')}
+
+  async function loadExcel(input){
+    const file=input.files&&input.files[0];if(!file)return;
+    try{
+      const data=await file.arrayBuffer();workbook=XLSX.read(data,{type:'array',cellDates:true});
+      const stockName=workbook.SheetNames.find(n=>norm(n)==='STOCK_SISTEMA')||workbook.SheetNames[0];
+      const raw=XLSX.utils.sheet_to_json(workbook.Sheets[stockName],{defval:''});
+      stockRows=raw.map((r,i)=>({
+        sourceRow:i+2,reference:String(valueFrom(r,['Referencia Interna','Referencia interna'])),product:String(valueFrom(r,['Producto'])),lot:normLot(valueFrom(r,['Número de lote','Numero de lote','Lote'])),expiry:excelDate(valueFrom(r,['Fecha de caducidad','Fecha de vencimiento'])),systemLocation:String(valueFrom(r,['Lugar','Lugar sistema','Ubicación'])),systemStock:num(valueFrom(r,['Cantidad inventariada','Stock sistema'])),unit:String(valueFrom(r,['Unidad de Medida','Unidad'])),barcode:String(valueFrom(r,['Código de barras producto','Codigo de barras producto']))
+      })).filter(r=>r.reference||r.product);
+      const locName=workbook.SheetNames.find(n=>norm(n)==='UBICACIONES');
+      locations=locName?XLSX.utils.sheet_to_json(workbook.Sheets[locName],{defval:''}).map(r=>({code:String(valueFrom(r,['Código ubicación','Codigo ubicación'])),name:String(valueFrom(r,['Nombre ubicación','Nombre ubicacion'])),barcode:String(valueFrom(r,['Código de barras','Codigo de barras'])),active:norm(valueFrom(r,['Activa']))!=='NO'})).filter(x=>x.code||x.name||x.barcode):[];
+      state.fileName=file.name;persist();$('fileName').textContent=file.name;$('fileInfo').textContent=`${stockRows.length} registros de stock · ${locations.length} ubicaciones`;show('mainMessage','Inventario cargado correctamente.','ok');
+    }catch(e){show('mainMessage','No se pudo leer el Excel: '+e.message,'error')}
+  }
+
+  async function runOCR(input){
+    if(!stockRows.length){show('productMessage','Primero carga Inventario.xlsx.','error');return}
+    const file=input.files&&input.files[0];if(!file)return;identificationType='OCR';rawOCR='';
+    const url=URL.createObjectURL(file);$('labelPreview').src=url;$('labelPreview').style.display='block';$('busy').classList.add('show');
+    try{const result=await Tesseract.recognize(file,'spa');rawOCR=result.data.text||'';const p=parseLabel(rawOCR);$('reference').value=p.code;$('lot').value=p.lot;$('expiry').value=p.expiry;if(!p.code){show('productMessage','No se reconoció el código. Escríbelo manualmente.','error')}else findProduct(p.code,p.lot)}catch(e){show('productMessage','Error de OCR: '+e.message,'error')}finally{$('busy').classList.remove('show')}
+  }
+  function parseLabel(text){const t=norm(text).replace(/[–—]/g,'-');const cm=t.match(/\b[A-Z]{1,4}\s*[-]?\s*\d{3,6}\s*PE\b/);const lm=t.match(/\bSN\s*[-:.]?\s*([A-Z0-9]{3,})\s*-\s*([A-Z]\d+)\b/);const em=t.match(/F\.?\s*V\.?\s*[:\-]?\s*(\d{2})[\/-](\d{2})[\/-](\d{2,4})/);let y=em?em[3]:'';if(y.length===2)y='20'+y;return{code:cm?normCode(cm[0]):'',lot:lm?`SN-${lm[1]}-${lm[2]}`:'',expiry:em?`${em[1]}/${em[2]}/${y}`:''}}
+
+  function openBarcodePhoto(mode,row=0){if(!stockRows.length){show('productMessage','Primero carga Inventario.xlsx.','error');return}scanMode=mode;scanRow=row;$('barcodePhoto').value='';$('barcodePhoto').click()}
+  async function decodeBarcode(input){const file=input.files&&input.files[0];if(!file)return;$('busy').classList.add('show');const reader=new Html5Qrcode('barcodeReader');try{const code=await reader.scanFile(file,false);try{reader.clear()}catch(e){}if(scanMode==='product'){identificationType='CÓDIGO DE BARRAS';$('reference').value=code;findProduct(code,'')}else applyLocation(code,scanRow)}catch(e){try{reader.clear()}catch(x){}show(scanMode==='product'?'productMessage':'saveMessage','No se pudo leer el código. Toma otra foto más cerca y sin reflejos.','error')}finally{$('busy').classList.remove('show')}}
+
+  function findManual(){identificationType='MANUAL';findProduct($('reference').value,$('lot').value)}
+  function findProduct(identifier,lotWanted){
+    if(!stockRows.length){show('productMessage','Primero carga Inventario.xlsx.','error');return}
+    const code=normCode(identifier),lot=normLot(lotWanted);currentMatches=stockRows.filter(r=>normCode(r.reference)===code||(r.barcode&&normCode(r.barcode)===code));
+    const select=$('lotOptions');select.innerHTML='<option value="">Seleccione un lote</option>';currentMatches.forEach((r,i)=>{const o=document.createElement('option');o.value=i;o.textContent=r.lot||'(Sin lote)';select.appendChild(o)});
+    if(!currentMatches.length){current=null;show('productMessage',`Producto no encontrado: ${identifier}`,'error');addIncident('PRODUCTO NO ENCONTRADO',identifier,lot,'No existe en el archivo cargado');return}
+    let chosen=lot?currentMatches.find(r=>normLot(r.lot)===lot):null;if(!chosen&&currentMatches.length===1)chosen=currentMatches[0];
+    if(chosen){current=chosen;select.value=String(currentMatches.indexOf(chosen));applyProduct(chosen)}else{current=null;$('product').value=currentMatches[0].product;show('productMessage','El producto tiene varios lotes. Selecciona el lote correcto.','warning')}
+  }
+  function chooseLot(){const i=$('lotOptions').value;if(i==='')return;current=currentMatches[Number(i)];applyProduct(current)}
+  function applyProduct(r){$('reference').value=r.reference;$('product').value=r.product;$('lot').value=r.lot;$('expiry').value=r.expiry;$('unit').value=r.unit;$('systemStock').value=r.systemStock;$('systemTotal').textContent=fmt(r.systemStock);recalc();show('productMessage','Producto encontrado. Registra las ubicaciones y cantidades.','ok')}
+
+  function applyLocation(value,row){const code=normCode(value),text=norm(value);const loc=locations.find(x=>x.active&&(normCode(x.code)===code||normCode(x.barcode)===code||norm(x.name)===text));const input=$('loc'+row);if(loc){input.value=loc.code;input.dataset.name=loc.name;show('saveMessage','Ubicación reconocida: '+loc.name,'ok')}else{input.value=value;input.dataset.name=value;show('saveMessage','Ubicación no registrada; se guardará como incidencia.','warning');addIncident('UBICACIÓN NO REGISTRADA',$('reference').value,$('lot').value,value)}}
+  function validateLocation(value,row){if(value)applyLocation(value,row)}
+  function addIncident(type,reference,lot,detail){const key=[type,reference,lot,detail].join('|');if(!state.incidents.some(x=>x.key===key)){state.incidents.push({key,date:new Date().toISOString(),type,reference,lot,detail,status:'PENDIENTE'});persist()}}
+
+  function recalc(){let physical=0;for(let i=1;i<=10;i++)physical+=num($('qty'+i).value);const system=num($('systemStock').value);$('physicalTotal').textContent=fmt(physical);$('systemTotal').textContent=fmt(system);$('difference').textContent=fmt(physical-system)}
+  function saveCount(){
+    if(!current){show('saveMessage','Primero selecciona un producto y lote.','error');return}const operator=$('operator').value.trim();if(!operator){show('saveMessage','Ingresa el responsable del conteo.','error');return}
+    const rows=[];for(let i=1;i<=10;i++){const loc=$('loc'+i).value.trim(),qty=$('qty'+i).value;if(loc&&qty!=='')rows.push({id:crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+i,date:new Date().toISOString(),operator,identificationType,rawOCR,reference:current.reference,product:current.product,lot:$('lot').value,expiry:$('expiry').value,unit:current.unit,systemStock:current.systemStock,locationCode:loc,locationName:$('loc'+i).dataset.name||loc,quantity:num(qty),observation:$('observation').value})}
+    if(!rows.length){show('saveMessage','Registra por lo menos una ubicación y una cantidad.','error');return}state.counts.push(...rows);persist();show('saveMessage',`Se guardaron ${rows.length} ubicaciones correctamente.`,'ok');newProduct(false)
+  }
+  function newProduct(clearMessages=true){['reference','lot','product','expiry','unit','observation'].forEach(id=>$(id).value='');$('systemStock').value=0;$('lotOptions').innerHTML='<option value="">—</option>';for(let i=1;i<=10;i++){$('loc'+i).value='';$('loc'+i).dataset.name='';$('qty'+i).value=''}current=null;currentMatches=[];rawOCR='';identificationType='MANUAL';$('labelPreview').style.display='none';$('labelPhoto').value='';recalc();if(clearMessages){hide('productMessage');hide('saveMessage')}}
+  function saveOperator(){localStorage.setItem('tiyapuy_operator',$('operator').value)}
+  function refreshSession(){const keys=new Set(state.counts.map(x=>normCode(x.reference)+'|'+normLot(x.lot)));$('savedProducts').textContent=keys.size;$('savedLocations').textContent=state.counts.length;$('incidentsCount').textContent=state.incidents.length}
+
+  function exportFinalExcel(){
+    if(!stockRows.length){show('mainMessage','Primero carga Inventario.xlsx.','error');return}
+    const grouped=new Map();for(const r of stockRows){const key=normCode(r.reference)+'|'+normLot(r.lot);if(!grouped.has(key))grouped.set(key,{...r,physical:0,countRows:0});}
+    for(const c of state.counts){const key=normCode(c.reference)+'|'+normLot(c.lot);if(!grouped.has(key))grouped.set(key,{reference:c.reference,product:c.product,lot:c.lot,expiry:c.expiry,systemLocation:'',systemStock:c.systemStock,unit:c.unit,barcode:'',physical:0,countRows:0});const g=grouped.get(key);g.physical+=num(c.quantity);g.countRows++}
+    const summary=[...grouped.values()].map(g=>({'Referencia interna':g.reference,'Producto':g.product,'Lote':g.lot,'Fecha de vencimiento':g.expiry,'Lugar sistema':g.systemLocation,'Unidad':g.unit,'Stock sistema':g.systemStock,'Stock físico':g.physical,'Diferencia':g.physical-g.systemStock,'Estado':g.countRows===0?'PENDIENTE':g.physical===g.systemStock?'CUADRA':g.physical>g.systemStock?'SOBRANTE':'FALTANTE','Observación':''}));
+    const detail=state.counts.map(c=>({'ID conteo':c.id,'Fecha y hora':new Date(c.date).toLocaleString('es-PE'),'Usuario':c.operator,'Tipo identificación':c.identificationType,'Referencia interna':c.reference,'Producto':c.product,'Lote':c.lot,'Fecha de vencimiento':c.expiry,'Unidad':c.unit,'Stock sistema':c.systemStock,'Ubicación física':c.locationName,'Código ubicación':c.locationCode,'Cantidad física':c.quantity,'Observación':c.observation}));
+    const incidents=state.incidents.map(x=>({'Fecha':new Date(x.date).toLocaleString('es-PE'),'Tipo incidencia':x.type,'Referencia interna':x.reference,'Lote':x.lot,'Detalle':x.detail,'Estado revisión':x.status}));
+    const stock=stockRows.map(r=>({'Referencia Interna':r.reference,'Producto':r.product,'Número de lote':r.lot,'Fecha de caducidad':r.expiry,'Lugar':r.systemLocation,'Cantidad inventariada':r.systemStock,'Unidad de Medida':r.unit,'Código de barras producto':r.barcode}));
+    const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(summary),'RESUMEN_AJUSTE');XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(detail),'DETALLE_CONTEO');XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(incidents),'INCIDENCIAS');XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(stock),'STOCK_SISTEMA');XLSX.writeFile(wb,'INVENTARIO_DEFINITIVO.xlsx');show('saveMessage','Excel definitivo generado correctamente.','ok')
+  }
+  function clearSession(){if(!confirm('¿Seguro que deseas borrar todos los conteos e incidencias guardados en este dispositivo?'))return;state={counts:[],incidents:[],fileName:state.fileName};persist();show('saveMessage','Conteos eliminados.','ok')}
+  function buildRows(){const box=$('countRows');for(let i=1;i<=10;i++)box.insertAdjacentHTML('beforeend',`<div class="count-row"><div class="badge">${i}</div><div><label>Ubicación</label><div class="field-action"><input id="loc${i}" data-name="" placeholder="Código ubicación" onchange="validateLocation(this.value,${i})"><button class="icon" onclick="openBarcodePhoto('location',${i})">▦</button></div></div><div><label>Cantidad</label><input id="qty${i}" type="number" min="0" step="0.001" inputmode="decimal" oninput="recalc()"></div></div>`)}
+  function init(){buildRows();$('operator').value=localStorage.getItem('tiyapuy_operator')||'';if(state.fileName){$('fileName').textContent=state.fileName;$('fileInfo').textContent='Vuelve a cargar el Excel para continuar; los conteos siguen guardados.'}refreshSession();recalc()}
+  init();
+</script>
+</body>
+</html>
